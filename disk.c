@@ -1,10 +1,11 @@
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "disk.h"
 
-static char* block_arr_ptr;
+static char* block_arr_ptr_static;
 
 disk* create_disk(int nbytes) {
 
@@ -15,13 +16,13 @@ disk* create_disk(int nbytes) {
     }
 
     disk *diskptr = (struct disk *)disk_array;
-    block_arr_ptr = (disk_array + sizeof(disk));
+    block_arr_ptr_static = (disk_array + sizeof(disk));
 
     diskptr->size = nbytes;
     diskptr->blocks = (nbytes - 24) / BLOCKSIZE;
     diskptr->reads = 0;
     diskptr->writes = 0;
-    diskptr->block_arr = &block_arr_ptr;
+    diskptr->block_arr = &block_arr_ptr_static;
 
     return diskptr;
 }
@@ -56,4 +57,21 @@ int free_disk(disk *diskptr) {
     /*convert diskptr to char*/
     char* disk_array = (char*)diskptr;
     free(disk_array);
+}
+
+/*utility script*/
+int print_block(disk *diskptr, int blocknr) {
+
+    if (blocknr >= diskptr->blocks) {
+        printf("Invalid block number");
+    }
+
+    char *block_arr_ptr = *(diskptr->block_arr);
+    char *block_ptr = block_arr_ptr + blocknr*BLOCKSIZE;
+    uint32_t *block_int_ptr = (uint32_t *)block_ptr;
+    
+    for (int i=0; i<1024; i++) {
+        printf("%x:", block_int_ptr[i]);
+    }
+    printf("\n");
 }
