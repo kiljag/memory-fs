@@ -5,128 +5,33 @@
 
 #include "disk.h"
 #include "sfs.h"
+#include "util.h"
 
 static disk* mounted_disk_ptr = NULL;
+static super_block super_block_struct;
 
-/*utility functions*/ 
-
-/*set bit at kth position in int array A*/
-void setBit(uint32_t *A, uint32_t k) {
-    uint32_t i = k / 32;
-    uint32_t pos = k % 32;
-    A[i] = A[i] | (1 << pos);
-}
-
-/*clear bit at kth position in int array A*/
-void clearBit(uint32_t *A, uint32_t k) {
-    uint32_t i = k / 32;
-    uint32_t pos = k % 32;
-    A[i] = A[i] & ~(1 << pos);
-}
-
-/*test if bit at kth position is set or not*/
-uint32_t testBit(uint32_t *A, uint32_t k) {
-    uint32_t i = k / 32;
-    uint32_t pos = k % 32;
-
-    if (A[i] & (1 << pos)) {
-        return 1;
-    } else {
-        return 0;
-    }
-}
-
-/* get the first available unset bit position
- * size_in_bits also denotes number of inodes */
-int getFirstAvailableBit(uint32_t *A, uint32_t size_in_bits) {
-    int i, pos;
-    // printf("size in bits : %u\n", size_in_bits);
-
-    //check in $(size_in_bits/32) integer blocks
-    for (i = 0; i < (size_in_bits / 32); i++) {
-        
-        if (A[i] ^ 0xFFFFFFFF) {
-            for(pos = 0; pos < 32; pos++) {
-                int k = (32 * i) + pos;
-                if(!testBit(A, (uint32_t)k)){
-                    // printf("size_in_bits : %d i: %d, k: %d\n", size_in_bits, i, k);
-                    return k;
-                };
-            }
-        }
-    }
-
-    //check in remaining bits of last integer block
-    // for (pos = 0; pos < (size_in_bits % 32); pos++) {
-    //     int k = 32 * i + pos;
-    //     if(!testBit(A, k)) {
-    //         printf("i: %d, k: %d\n", i, k);
-    //         return k;
-    //     }
-    // }
-
-    return -1;
-}
-
-void swap(int* a, int* b) {
-    int t = *a;
-    *a = *b;
-    *b = t;
-}
-
-int quick_sort_partition(int *arr, int low, int high) {
-    int pivot = arr[high];
-    int i = (low - 1);
-
-    int j;
-    for (j = low; j <= high - 1; j++) {
-        if (arr[j] < pivot) {
-            i++;
-            swap(&arr[i], &arr[j]);
-        }
-    }
-    swap(&arr[i+1], &arr[high]);
-    return (i+1);
-}
-
-/*sort an array of uint32_t*/
-void quick_sort(uint32_t *arr, int low, int high) {
-    if (low < high) {
-        int pi = quick_sort_partition(arr, low, high);
-        
-        quick_sort(arr, low, pi - 1);
-        quick_sort(arr, pi + 1, high);
-    }
-}
-
-/*an utility function to print block data in hex format*/
-void print_block_data(char* block_data) {
-    for (int i=0; i<1024; i++) {
-        printf("%x:", ((uint32_t *)block_data)[i]);
-    }
-    printf("\n");
-}
 
 int format(disk *diskptr) {
 
-    int total_blocks = diskptr->blocks;
-    int inode_and_data_blocks =  total_blocks - 1;
+    uint32_t total_blocks = diskptr->blocks;
+    uint32_t inode_and_data_blocks =  total_blocks - 1;
 
-    int inode_blocks = (int)(0.1 * inode_and_data_blocks);
+    uint32_t inode_blocks = (int)(0.1 * inode_and_data_blocks);
     inode_blocks = (inode_blocks > 0) ? inode_blocks : 1; 
 
-    int num_inodes = inode_blocks * 128;
-    int inode_bitmap_blocks = (num_inodes) / (8 * 4096);
+    uint32_t num_inodes = inode_blocks * 128;
+    uint32_t inode_bitmap_blocks = (num_inodes) / (8 * 4096);
     if (num_inodes % (8 * 4096) != 0) {
         inode_bitmap_blocks += 1;
     }
 
-    int remaining_blocks = inode_and_data_blocks - (inode_blocks + inode_bitmap_blocks);
-    int data_bitmap_blocks = (remaining_blocks) / (8 * 4096);
+    uint32_t remaining_blocks = inode_and_data_blocks - (inode_blocks + inode_bitmap_blocks);
+    uint32_t data_bitmap_blocks = (remaining_blocks) / (8 * 4096);
     if (remaining_blocks % (8 * 4096) != 0) {
         data_bitmap_blocks +=  1;
     }
-    int data_blocks = remaining_blocks - data_bitmap_blocks;
+    
+    uint32_t data_blocks = remaining_blocks - data_bitmap_blocks;
 
     char *super_block_data = (char *)malloc(4096 * sizeof(char));
     super_block *super_block_struct = (super_block *)super_block_data;
@@ -143,16 +48,16 @@ int format(disk *diskptr) {
     super_block_struct->data_block_idx = 1 + inode_bitmap_blocks + data_bitmap_blocks + inode_blocks;
     super_block_struct->data_blocks = data_blocks;
 
-    // write super block
+    // write initialized super block back to disk
     write_block(diskptr, 0, super_block_data);
 
     return 0;
 }
 
+
 int mount(disk *diskptr) {
     
-    /*read super block and store it in super_block_struct*/
-    super_block super_block_struct;
+    /*read super block and store it in static super_block_struct*/
     char *super_block_data = (char *)malloc(4096 * sizeof(char));
     read_block(diskptr, 0, super_block_data);
     memcpy((void *)&super_block_struct, (void *)super_block_data, sizeof(super_block));
@@ -184,6 +89,7 @@ int mount(disk *diskptr) {
     }
 }
 
+
 int create_file() {
 
     if (mounted_disk_ptr == NULL) {
@@ -194,72 +100,72 @@ int create_file() {
     disk* diskptr = mounted_disk_ptr;
     char* block_data = (char *)malloc(4096 * sizeof(char));
     
-    /*read super block and store it in super_block_struct*/
-    super_block super_block_struct;
-    read_block(diskptr, 0, block_data);
-    memcpy((void *)&super_block_struct, (void *)block_data, sizeof(super_block));
-    
-
-    uint32_t inode_bitmap_block_idx = super_block_struct.inode_bitmap_block_idx;
-    uint32_t num_inodes = super_block_struct.inodes;
+    int inode_bitmap_block_idx = (int)super_block_struct.inode_bitmap_block_idx;
+    int num_inodes = (int)super_block_struct.inodes;
    
     int free_inode_index = -1;
     int k;
 
-    
     /* check for first available inode in all the inode bitmap blocks */
-    int i;
+    int i; //to iterate the inode bitmap blocks
     for (i = 0; i < num_inodes / (8 * 4096); i++) {
         read_block(diskptr, inode_bitmap_block_idx + i, block_data);
-        k = getFirstAvailableBit((uint32_t *)block_data, 8 * 4096);
+        k = getFirstAvailableBit((int *)block_data, 8 * 4096);
         if (k >= 0) {
             free_inode_index = (8 * 4096 * i) + k;
             break;
         }
     }
 
-    /* check in last partially utilized bitmap block */
+    /* check in last partially utilized bitmap block if there is any*/
     if (free_inode_index < 0 && num_inodes % (8 * 4096) != 0) {
-        
         read_block(diskptr, inode_bitmap_block_idx + i, block_data);
-
-
-        k = getFirstAvailableBit((uint32_t *)block_data, num_inodes % (8 * 4096));
+        int remaing_size =  num_inodes % (8 * 4096);
+        k = getFirstAvailableBit((int *)block_data, remaing_size);
         if (k >= 0) {
             free_inode_index = (8 * 4096 * i) + k;
         }
     }
-    // printf("free inode position : %d\n", free_inode_index);
     
     /*return -1 if no inodes are left to assign */
     if (free_inode_index < 0) {
+        printf("free inodes are unavaible\n");
         free(block_data);
         return -1;
     }
     
     /*set inode bitmap at the assigned inode position and write back to disk */
-    setBit((uint32_t *)block_data, k);
-    // for (int i=0; i<32*36; i++) {
-    //     printf("%x:", ((uint32_t *)block_data)[i]);
-    // }
-    // printf("\n");
-
-    // printf("writing to block %u\n\n", inode_bitmap_block_idx + i);
+    setBit((int *)block_data, k);
     write_block(diskptr, inode_bitmap_block_idx + i, block_data);
 
     /*read the block which has free inode data and initialize it */
     int free_inode_block = free_inode_index / 128;
-    int free_inode_offset = (free_inode_index % 128) * sizeof(inode);
+    int free_inode_offset = (free_inode_index % 128) * 32;
     read_block(diskptr, free_inode_block, block_data);
-
+    // print_block_data(block_data);
     inode* free_inode_ptr = (inode*)(block_data + free_inode_offset);
     free_inode_ptr->valid = 1;
     free_inode_ptr->size = 0;
+    for (int i = 0; i < 5; i++) {
+        free_inode_ptr->direct[i] = 0;
+    }
+    free_inode_ptr->indirect = 0;
 
+    /*write the initialized inode back to disk*/
     write_block(diskptr, free_inode_block, block_data);
 
     free(block_data);
+    // print_block_data(block_data);
     return free_inode_index;
+}
+
+void intialize_inode(int inumber) {
+    return;
+}
+
+/* utility functions */
+void read_inode_struct(int inumber, inode* inode_ptr) {
+    return;
 }
 
 int remove_file(int inumber) {
@@ -268,16 +174,12 @@ int remove_file(int inumber) {
         printf("sfs is not mounted..\n");
         return -1;
     }
+
     disk* diskptr = mounted_disk_ptr;
     char* block_data = (char *)malloc(4096 * sizeof(char));
-
-    /*read super block and store it in super_block_struct*/
-    super_block super_block_struct;
-    read_block(diskptr, 0, block_data);
-    memcpy((void *)&super_block_struct, (void *)block_data, sizeof(super_block));
     
     /*check inumber a valid inode or not*/
-    if (inumber >= super_block_struct.inodes) {
+    if (inumber >= (int)super_block_struct.inodes) {
         free(block_data);
         return -1;
     }
@@ -286,8 +188,7 @@ int remove_file(int inumber) {
 
     /* read inode data and store it in super_bloc_struct
      * set inode->valid to zero and write the block back to disk */
-    uint32_t inode_relative_pos = inumber % 128;
-    uint32_t inode_block_index = super_block_struct.inode_block_idx + (inumber / 128);
+    int inode_block_index = (int)super_block_struct.inode_block_idx + (inumber / 128);
     read_block(diskptr, inode_block_index, block_data);
     inode* inode_ptr = (inode *)(block_data + (inumber % 128) * 32);
     memcpy((void *)&inode_struct, (void *)inode_ptr, sizeof(inode));
@@ -295,18 +196,163 @@ int remove_file(int inumber) {
     write_block(diskptr, inode_block_index, block_data);
 
     /* update inode bitmap */
-    uint32_t inode_bitmap_block_index = super_block_struct.inode_bitmap_block_idx;
+    int inode_bitmap_block_index = (int)super_block_struct.inode_bitmap_block_idx;
     inode_bitmap_block_index += (inumber / (8 * 4096));
-    uint32_t inode_bitmap_bit_pos =  inumber % ( 8 * 4096);
+    int inode_bitmap_bit_pos =  inumber % ( 8 * 4096);
     read_block(diskptr, inode_bitmap_block_index, block_data);
-    print_block_data(block_data);
-    clearBit((uint32_t *)block_data, inode_bitmap_bit_pos);
-    print_block_data(block_data);
+    clearBit((int *)block_data, inode_bitmap_bit_pos);
     write_block(diskptr, inode_bitmap_block_index, block_data);
-    read_block(diskptr, inode_bitmap_block_index, block_data);
+    
+
+    /*collect all the data blocks used by inode  */
+    int num_data_blocks_used = (int)inode_struct.size / 4096;
+    num_data_blocks_used += (inode_struct.size % 4096 != 0) ? 1 : 0;
+    int num_blocks_used;
+
+    int *block_idx_arr = NULL;
+    
+    if (num_data_blocks_used > 5) { /*in case an indirect pointer is used*/
+        num_blocks_used = num_data_blocks_used + 1;
+        block_idx_arr = (int *)malloc(num_blocks_used * sizeof(int));
+
+        /*copy direct pointers*/
+        memcpy((void *)block_idx_arr, (void *)inode_struct.direct, 5 * sizeof(int));
+
+        /*read indirect block and copy indirect pointers*/
+        read_block(diskptr, inode_struct.indirect, block_data);
+        memcpy((void *)(block_idx_arr + 5), (void *)block_data, (num_data_blocks_used - 5) * sizeof(int));
+
+        /*copy the block index used to store indirect pointers*/
+        block_idx_arr[num_blocks_used - 1] = (int)(inode_struct.indirect);
+ 
+    } else { /* only direct pointers are used */
+        num_blocks_used = num_data_blocks_used;
+        block_idx_arr = (int *)malloc(num_blocks_used * sizeof(int));
+
+        /*copy direct pointers*/
+        memcpy((void *)block_idx_arr, (void *)inode_struct.direct, num_blocks_used * sizeof(int));
+    }
+
+    /*sort the block used to clear the data bitmap blocks block wise*/
+    quick_sort((int *)block_idx_arr, 0, (int)(num_blocks_used - 1));
+
+    int num_bitmap_blocks = (int)super_block_struct.data_blocks / (4096 * 8);
+    num_bitmap_blocks += (super_block_struct.data_blocks % (4096 * 8) != 0) ? 1 : 0;
+    
+    
+    /*clear the data bitmap blocks, block wise */
+    int k = 0;
+    for (int j = 0; j < num_bitmap_blocks; j++) {
+        int bitmap_block_index = super_block_struct.data_block_bitmap_idx + j;
+        read_block(diskptr, bitmap_block_index, block_data);
+        while(k < num_blocks_used && block_idx_arr[k] < (4096*8*(j+1))) {
+            clearBit((int *)block_data, block_idx_arr[k]);
+            k++;
+        }
+        write_block(diskptr, bitmap_block_index, block_data);
+        if (k >= num_blocks_used) {
+            break;
+        }
+    }
+
+    free(block_idx_arr);
+    free(block_data);
+    return 0;
+}
+
+int stat(int inumber) {
+    printf("function stat..\n");
+    if (mounted_disk_ptr == NULL) {
+        printf("sfs is not mounted..\n");
+        return -1;
+    }
+
+    disk* diskptr = mounted_disk_ptr;
+    char* block_data = (char *)malloc(4096 * sizeof(char));
+
+    /*check if inumber is a valid inode or not*/
+    if (inumber >= (int)super_block_struct.inodes) {
+        free(block_data);
+        return -1;
+    }
+
+    inode inode_struct;
+
+    /*read inode and copy it to inode_struct*/
+    uint32_t inode_block_index = super_block_struct.inode_block_idx + (inumber / 128);
+    read_block(diskptr, inode_block_index, block_data);
+    inode* inode_ptr = (inode *)(block_data + (inumber % 128) * 32);
+    memcpy((void *)&inode_struct, (void *)inode_ptr, sizeof(inode));
     print_block_data(block_data);
 
-    /*update the data block bitmap */
+    /*check if inode is valid or not*/
+    if ((int)inode_struct.valid == 0) {
+        printf("Invalid inode index %d\n", inumber);
+        free(block_data);
+        return -1;
+    }
+
+    int num_blocks_used = (int)inode_struct.size / (4096);
+    num_blocks_used += (inode_struct.size % 4096 != 0) ? 1 : 0;
+
+    int direct_pointers, indirect_pointers;
+    if (num_blocks_used > 5) {
+        direct_pointers = 5;
+        indirect_pointers = num_blocks_used - 5;
+    } else {
+        direct_pointers = num_blocks_used;
+        indirect_pointers = 0;
+    }
+
+    printf("\n==== inode %d statistics ====\n", inumber);
+    printf("logical size : %d\n", (int)inode_struct.size);
+    printf("# direct pointers   : %d\n", direct_pointers);
+    printf("# indirect pointers : %d\n", indirect_pointers);
+    printf("==== ******************** ====\n");
+
+    free(block_data);
+    return 0;
+}
+
+int read_i(int inumber, char *data, int length, int offset) {
+
+    if (mounted_disk_ptr == NULL) {
+        printf("sfs is not mounted..\n");
+        return -1;
+    }
+
+    disk* diskptr = mounted_disk_ptr;
+    char* block_data = (char *)malloc(4096 * sizeof(char));
+
+    /*check if inumber is valid or not*/
+    if (inumber >= super_block_struct.inodes) {
+        free(block_data);
+        return -1;
+    }
+
+    inode inode_struct;
+
+    /*read inode and copy it to inode_strruct*/
+    uint32_t inode_relative_pos = inumber % 128;
+    uint32_t inode_block_index = super_block_struct.inode_block_idx + (inumber / 128);
+    read_block(diskptr, inode_block_index, block_data);
+    inode* inode_ptr = (inode *)(block_data + (inumber % 128) * 32);
+    memcpy((void *)&inode_struct, (void *)inode_ptr, sizeof(inode));
+
+    /*check and offset are valid*/
+    if (offset >=  inode_struct.size) {
+        free(block_data);
+        return -1;
+    }
+
+    if (offset + length > inode_struct.size) {
+        length = inode_struct.size - offset;
+    }
+
+    /*read bytes in range [offset, offset + length) */
+    length = (length < inode_struct.size - offset) ? length : (inode_struct.size - offset);
+
+    /*read data block indices into an array*/
     uint32_t num_data_blocks_used = inode_struct.size / 4096;
     num_data_blocks_used += (inode_struct.size % 4096 != 0) ? 1 : 0;
 
@@ -328,36 +374,6 @@ int remove_file(int inumber) {
         data_block_idx_arr[i] = inode_struct.indirect;
     }
 
-    /*sort the block used to clear the data bitmap blocks block wise*/
-    quick_sort((int *)data_block_idx_arr, 0, (int)(num_blocks_used - 1));
-
-    uint32_t num_bitmap_blocks = super_block_struct.data_blocks / (4096 * 8);
-    num_bitmap_blocks += (super_block_struct.data_blocks % (4096 * 8) != 0) ? 1 : 0;
-
-    int j, k;
-    
-    /*clear the data bitmap blocks, bitmap block wise */
-    for (j = 0; j < num_bitmap_blocks; j++) {
-        int bitmap_block_index = super_block_struct.data_block_bitmap_idx + j;
-        read_block(diskptr, bitmap_block_index, block_data);
-        while(k < num_blocks_used && data_block_idx_arr[k] < (4096*8*(j+1))) {
-            clearBit((uint32_t *)block_data, data_block_idx_arr[k]);
-        }
-        write_block(diskptr, bitmap_block_index, block_data);
-        if (k >= num_blocks_used) {
-            break;
-        }
-    }
-
-    free(block_data);
-    return 0;
-}
-
-int stat(int inumber) {
-    return 0;
-}
-
-int read_i(int inumber, char *data, int length, int offset) {
     return 0;
 }
 

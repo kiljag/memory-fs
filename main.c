@@ -37,11 +37,20 @@ int main(){
 	// remove_file(inode_index);
 	// inode_index = create_file();
 
+	print_block(diskptr, 1);
+	int inode_index = create_file();
+	print_block(diskptr, 1);
+	stat(inode_index);
+	remove_file(inode_index);
+	stat(inode_index);
+
+	// 
 	
-	for (int i=0; i< 200; i++) {
-		int j = create_file();
-		// printf("i : %d inode_index : %d\n", i, inode_index);
-	}
+	// for (int i=0; i< 200; i++) {
+	// 	printf("i : %d\n", i);
+	// 	int inode_index = create_file();
+	// 	// printf("i : %d inode_index : %d\n", i, inode_index);
+	// }
 	
 
 

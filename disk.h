@@ -19,4 +19,4 @@ int write_block(disk *diskptr, int blocknr, void *block_data);
 
 int free_disk(disk *diskptr);
 
-int print_block(disk *diskptr, int blocknr);
+void print_block(disk *diskptr, int blocknr);
