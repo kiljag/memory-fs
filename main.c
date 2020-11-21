@@ -34,6 +34,13 @@ void test_disk_read_write(disk* diskptr) {
 
 }
 
+void test_read_write_inode() {
+	char data[10] = {'A', 'B', 'C'};
+	int inode_index = create_file();
+	
+	int len = write_i(inode_index, data, sizeof(data), 0);
+}
+
 int main(){
 	
 	// disk* diskptr = create_disk(40960+24);
@@ -48,10 +55,12 @@ int main(){
 	mount(diskptr);
 	
 	
-	int inode_index = create_file();
-	stat(inode_index);
-	remove_file(inode_index);
-	stat(inode_index);
+	// int inode_index = create_file();
+	// stat(inode_index);
+	// remove_file(inode_index);
+	// stat(inode_index);
+	
+	test_read_write_inode();
 
 	return 0;
 }

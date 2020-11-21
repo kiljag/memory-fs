@@ -9,7 +9,7 @@
 
 static disk* mounted_disk_ptr = NULL;
 static super_block super_block_struct;
-
+static char block_data[4096]; /*used to read block data*/
 
 int format(disk *diskptr) {
 
@@ -90,16 +90,10 @@ int mount(disk *diskptr) {
 }
 
 
-int create_file() {
-
-    if (mounted_disk_ptr == NULL) {
-        printf("sfs is not mounted..\n");
-        return -1;
-    }
-
-    disk* diskptr = mounted_disk_ptr;
-    char* block_data = (char *)malloc(4096 * sizeof(char));
+int get_set_first_available_inode_index() {
     
+    disk* diskptr = mounted_disk_ptr;
+
     int inode_bitmap_block_idx = (int)super_block_struct.inode_bitmap_block_idx;
     int num_inodes = (int)super_block_struct.inodes;
    
@@ -120,26 +114,108 @@ int create_file() {
     }
 
     /* check in last partially utilized bitmap block if there is one*/
-    if (free_inode_index < 0 && num_inodes % (block_size_in_bits) != 0) {
+    if (free_inode_index < 0 && (num_inodes % block_size_in_bits) != 0) {
         read_block(diskptr, inode_bitmap_block_idx + i, block_data);
-        int remaing_size_in_bits =  num_inodes % (8 * 4096);
+        int remaing_size_in_bits =  num_inodes % block_size_in_bits;
         k = getFirstAvailableBit((int *)block_data, remaing_size_in_bits);
         if (k >= 0) {
             free_inode_index = (block_size_in_bits * i) + k;
         }
     }
+
+    /*if free data block is found*/
+    if (free_inode_index >= 0) {
+        setBit((int *)block_data, k);
+        write_block(diskptr, inode_bitmap_block_idx + i, block_data);
+    } else {
+        printf("no inodes are left to assign\n");
+    }
+
+    return free_inode_index;
+}
+
+
+int get_set_first_available_data_block_index() {
+
+    disk* diskptr = mounted_disk_ptr;
+
+    int data_block_bitmap_idx = (int)super_block_struct.data_block_bitmap_idx;
+    int num_data_blocks = (int)super_block_struct.data_blocks;
+
+    int free_data_block_index = -1;
+    int k;
+
+    int i;
+    int block_size_in_bits = 8 * 4096;
+
+    for(i = 0; i < num_data_blocks / block_size_in_bits; i++) {
+        read_block(diskptr, data_block_bitmap_idx + i, block_data);
+        k = getFirstAvailableBit((int *)block_data, block_size_in_bits);
+        if (k >= 0) {
+            free_data_block_index = (block_size_in_bits * i) + k;
+            break;
+        }
+    }
+
+    if (free_data_block_index < 0 && (num_data_blocks % block_size_in_bits) != 0) {
+        read_block(diskptr, data_block_bitmap_idx + i, block_data);
+        int remaing_size_in_bits = num_data_blocks % block_size_in_bits;
+        k = getFirstAvailableBit((int *)block_data, remaing_size_in_bits);
+        if (k >= 0) {
+            free_data_block_index = (block_size_in_bits * i) + k;
+        }
+    }
+
+    /*if free data block is found*/
+    if (free_data_block_index >= 0) {
+        setBit((int *)block_data, k);
+        write_block(diskptr, data_block_bitmap_idx + i, block_data);
+    } else {
+        printf("disk is full, no data blocks left\n");
+    }
+
+    return free_data_block_index;
+}
+
+void read_inode_struct(int inumber, inode* inode_struct_ptr) {
+
+    disk* diskptr = mounted_disk_ptr;
+    /*read inode from disk and copy it at inode_struct_ptr*/
+    int inode_block_idx = (int)super_block_struct.inode_block_idx + (inumber / 128);
+    read_block(diskptr, inode_block_idx, block_data);
+    inode* inode_ptr = (inode *)(block_data + (inumber % 128) * 32);
+    memcpy((void *)inode_struct_ptr, (void *)inode_ptr, sizeof(inode));
+    return;
+}
+
+void write_inode_struct(int inumber, inode* inode_struct_ptr) {
+
+    disk* diskptr = mounted_disk_ptr;
+    /*write inode to disk*/
+    int inode_block_idx = (int)super_block_struct.inode_block_idx + (inumber / 128);
+    read_block(diskptr, inode_block_idx, block_data);
+    inode* inode_ptr = (inode *)(block_data + (inumber % 128) * 32);
+    memcpy((void *)inode_ptr, (void *)inode_struct_ptr, sizeof(inode));
+    write_block(diskptr, inode_block_idx, block_data);
+}
+
+
+int create_file() {
+
+    if (mounted_disk_ptr == NULL) {
+        printf("sfs is not mounted..\n");
+        return -1;
+    }
+
+    disk* diskptr = mounted_disk_ptr;
     
-    /*return -1 if no inodes are left to assign */
-    if (free_inode_index < 0) {
-        printf("free inodes are unavailable\n");
-        free(block_data);
+    /*get free inode*/
+    int free_inode_index = get_set_first_available_inode_index();
+
+    if (free_inode_index < 0) { /*return -1 if no inodes are left to assign */
         return -1;
     }
     
-    /*set inode bitmap at the assigned inode position and write back to disk */
-    setBit((int *)block_data, k);
-    write_block(diskptr, inode_bitmap_block_idx + i, block_data);
-
     /*read the block which has free inode data and initialize it */
     int free_inode_block_idx = (int)super_block_struct.inode_block_idx + (free_inode_index / 128);
     int free_inode_block_offset = (free_inode_index % 128) * 32;
@@ -157,9 +233,9 @@ int create_file() {
     /*write the initialized inode back to disk*/
     write_block(diskptr, free_inode_block_idx, block_data);
 
-    free(block_data);
     return free_inode_index;
 }
+
 
 int remove_file(int inumber) {
 
@@ -254,6 +330,7 @@ int remove_file(int inumber) {
     return 0;
 }
 
+
 int stat(int inumber) {
 
     // printf("function stat..\n");
@@ -309,6 +386,7 @@ int stat(int inumber) {
     return 0;
 }
 
+
 int read_i(int inumber, char *data, int length, int offset) {
 
     if (mounted_disk_ptr == NULL) {
@@ -327,7 +405,7 @@ int read_i(int inumber, char *data, int length, int offset) {
 
     inode inode_struct;
 
-    /*read inode and copy it to inode_strruct*/
+    /*read inode and copy it to inode_struct*/
     int inode_block_idx = (int)super_block_struct.inode_block_idx + (inumber / 128);
     read_block(diskptr, inode_block_idx, block_data);
     inode* inode_ptr = (inode *)(block_data + (inumber % 128) * 32);
@@ -362,7 +440,7 @@ int read_i(int inumber, char *data, int length, int offset) {
         memcpy((void *)(blocks_idx_arr + 5), (void *)block_data, (num_data_blocks_used - 5) * sizeof(int));
 
     } else {
-        memcpy((void *)blocks_idx_arr, (void *)inode_struct.direct, num_data_blocks_used);
+        memcpy((void *)blocks_idx_arr, (void *)inode_struct.direct, num_data_blocks_used * sizeof(int));
     }
 
     int block_begin = offset / 4096;
@@ -377,11 +455,144 @@ int read_i(int inumber, char *data, int length, int offset) {
     int byte_offset = offset % 4096;
     memcpy(data, blocks_storage + byte_offset, length);
 
+    free(blocks_storage);
+    free(blocks_idx_arr);
     return length;
 }
 
+
 int write_i(int inumber, char *data, int length, int offset) {
-    return 0;
+
+    if (mounted_disk_ptr == NULL) {
+        printf("sfs is not mounted..\n");
+        return -1;
+    }
+
+    disk* diskptr = mounted_disk_ptr;
+    char* block_data = (char *)malloc(4096 * sizeof(char));
+
+    /*check if inumber is valid or not*/
+    if (inumber >= (int)super_block_struct.inodes) {
+        free(block_data);
+        return -1;
+    }
+
+    /*get inode struct*/
+    inode inode_struct;
+    read_inode_struct(inumber, &inode_struct);
+
+    // /*read inode and copy it to inode_struct*/
+    // int inode_block_idx = (int)super_block_struct.inode_block_idx + (inumber / 128);
+    // read_block(diskptr, inode_block_idx, block_data);
+    // inode* inode_ptr = (inode *)(block_data + (inumber % 128) * 32);
+    // memcpy((void *)&inode_struct, (void *)inode_ptr, sizeof(inode));
+
+    /*offset can be at max inode size, usually appending*/
+    if(offset < 0 && offset > (int)inode_struct.size) {
+        free(block_data);
+        return -1;
+    }
+
+    /*compute the extra blocks needed for the write operation*/
+    int data_blocks_used = (int)inode_struct.size / 4096;
+    data_blocks_used += ((int)inode_struct.size % 4096 != 0) ? 1 : 0;
+    
+    int total_blocks_needed = (offset + length) / 4096;
+    total_blocks_needed += ((offset + length) % 4096 != 0) ? 1 : 0;
+
+    int extra_blocks_needed = total_blocks_needed - data_blocks_used;
+    int *blocks_idx_arr = (int *)malloc(total_blocks_needed * sizeof(int));
+
+    if (data_blocks_used > 5) {
+        memcpy((void *)blocks_idx_arr, (void *)inode_struct.direct, 5 * sizeof(int));
+        read_block(diskptr, (int)inode_struct.indirect, block_data);
+        memcpy((void *)(blocks_idx_arr + 5), (void *)block_data, (data_blocks_used - 5) * sizeof(int));
+
+    } else {
+        memcpy((void *)blocks_idx_arr, (void *)inode_struct.direct, data_blocks_used * sizeof(int));
+    }
+
+    int idx_it = data_blocks_used;
+
+    if (total_blocks_needed > 5) {
+
+        if (data_blocks_used > 5) { /* inode already has an indirect pointer*/
+
+            /*get extra indirect blocks*/
+            int* indirect_pointers = (int *)malloc(1024 * sizeof(int));
+            read_block(diskptr, (int)inode_struct.indirect, (char *)indirect_pointers);
+            indirect_pointers = indirect_pointers + (data_blocks_used - 5);
+
+            for (int i = 0; i < extra_blocks_needed; i++) {
+                int free_data_block_index = get_set_first_available_data_block_index();
+                blocks_idx_arr[idx_it++] = free_data_block_index;
+                *indirect_pointers = free_data_block_index;
+                indirect_pointers++;
+            }
+
+            /*update indirect block*/
+            write_block(diskptr, (int)inode_struct.indirect, (char *)indirect_pointers);
+            free(indirect_pointers);
+    
+        } else { /*inode doesn't have an indirect pointer*/
+
+            /*get extra direct blocks first*/
+            for (int i = data_blocks_used; i < 5; i++) {
+                int free_data_block_index = get_set_first_available_data_block_index();
+                blocks_idx_arr[idx_it++] = free_data_block_index;
+                inode_struct.direct[i] = free_data_block_index;
+            }
+            
+            /*get extra indirect blocks */
+            int free_indirect_block_index = get_set_first_available_data_block_index();
+            inode_struct.indirect = (uint32_t)free_indirect_block_index;
+
+            int* indirect_pointers = (int *)malloc(1024 * sizeof(int));
+            read_block(diskptr, (int)inode_struct.indirect, (char *)indirect_pointers);
+
+            for (int i = 0; i < (total_blocks_needed - 5); i++) {
+                int free_data_block_index = get_set_first_available_data_block_index();
+                blocks_idx_arr[idx_it++] = free_data_block_index;
+                *indirect_pointers = free_data_block_index;
+                indirect_pointers++;
+            }
+
+            /*update indirect block*/
+            write_block(diskptr, (int)inode_struct.indirect, (char *)indirect_pointers);
+            free(indirect_pointers);
+        }
+
+    } else { /*write can be fulfilled by direct pointers*/
+
+        for (int i = data_blocks_used; i < total_blocks_needed; i++) {
+            int free_data_block_index = get_set_first_available_data_block_index();
+            blocks_idx_arr[idx_it++] = free_data_block_index;
+            inode_struct.direct[i] = free_data_block_index;
+        }
+    }
+
+    int block_begin = offset / 4096;
+    int block_end = (offset + length - 1) / 4096;
+    
+    int num_write_blocks = block_end - block_begin + 1;
+    char* blocks_storage = (char *)malloc(num_write_blocks * 4096 * sizeof(char));
+    int i, j;
+    for (i = block_begin, j = 0; i <= block_end; i++, j++) {
+        read_block(diskptr, blocks_idx_arr[i], blocks_storage + 4096*j);
+    }
+
+    int byte_offset = offset % 4096;
+    memcpy(blocks_storage + byte_offset, data, length);
+
+    for (i = block_begin, j = 0; i <= block_end; i++, j++) {
+        write_block(diskptr, blocks_idx_arr[i], blocks_storage + 4096*j);
+    }
+
+    write_inode_struct(inumber, &inode_struct);
+    free(blocks_storage);
+    free(blocks_idx_arr);
+
+    return length;
 }
 
 

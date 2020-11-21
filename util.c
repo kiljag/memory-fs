@@ -51,14 +51,14 @@ int getFirstAvailableBit(int *A, int size_in_bits) {
         }
     }
 
-    //check in remaining bits of last integer block
-    // for (pos = 0; pos < (size_in_bits % 32); pos++) {
-    //     int k = 32 * i + pos;
-    //     if(!testBit(A, k)) {
-    //         printf("i: %d, k: %d\n", i, k);
-    //         return k;
-    //     }
-    // }
+    // check in remaining bits of last integer block
+    for (pos = 0; pos < (size_in_bits % 32); pos++) {
+        int k = 32 * i + pos;
+        if(!testBit(A, k)) {
+            // printf("size_in_bits : %d i: %d, k: %d\n", size_in_bits, i, k);
+            return k;
+        }
+    }
 
     return -1;
 }
