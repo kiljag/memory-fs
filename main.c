@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "disk.h"
 #include "sfs.h"
@@ -111,7 +112,7 @@ void testReadandWrite()
     a = read_file("Dir1/Dir3/Dir4/file1.txt", read_data, 20, 0);
 	printf("\nFirst 20 bytes of read data : %s\n",read_data);
 
-	printf("/n/nThe file's inode is the following\n",read_data);
+	printf("/n/nThe file's inode is the following\n");
 	stat(2);
 }
 
