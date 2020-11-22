@@ -1,3 +1,11 @@
+/*
+Advances in Operating System Design
+Assignment 2
+
+Jagadeesh Killi (16CS30013)
+Pruthvi Sampath Chabathula (16CS30028)
+*/
+
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
