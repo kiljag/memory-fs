@@ -52,10 +52,17 @@ void test_read_write_inode() {
 	
 }
 
+void fill_random_char_data(char* data, int size) {
+	for(int i=0; i<size; i++) {
+		data[i] = 65 + (char)random() % 60;
+	}
+}
+
 int main(){
 	
 	// disk* diskptr = create_disk(40960+24);
-	disk* diskptr = create_disk(409624);
+	// disk* diskptr = create_disk(409624);
+	disk* diskptr = create_disk(4096*1000 + 24);
 	
 	printf("size : %d\n", diskptr->size);
 	printf("blocks : %d\n\n", diskptr->blocks);
@@ -66,12 +73,15 @@ int main(){
 	mount(diskptr);
 	
 	
-	// int inode_index = create_file();
-	// stat(inode_index);
-	// remove_file(inode_index);
-	// stat(inode_index);
-	
-	// test_read_write_inode();
+	/**/
+	char *write_data = (char *)malloc(10000 * sizeof(char));
+	char *read_data = (char *)malloc(10000 * sizeof(char));
+	// fill_random_char_data(write_data);
+
+	create_dir("dir1");
+	fill_random_char_data(write_data, 10000);
+	write_file("dir1/a.txt", write_data, 10000, 0);
+
 
 	return 0;
 }

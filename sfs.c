@@ -634,15 +634,377 @@ int write_i(int inumber, char *data, int length, int offset) {
 }
 
 
-int read_file(char *filepath, char *data, int length, int offset) {
-    return 0;
+// int read_file(char *filepath, char *data, int length, int offset) {
+//     return 0;
+// }
+// int write_file(char *filepath, char *data, int length, int offset) {
+//     return 0;
+// }
+// int create_dir(char *dirpath) {
+//     return 0;
+// }
+// int remove_dir(char *dirpath) {
+//     return 0;
+// }
+
+
+int find_file(char *filename,int dirnode)// finds the given file/directory in directory given by dirnode
+{
+    if(strlen(filename) >=48) 
+    {
+        printf("File not found\n");
+        return -1;
+    }
+
+    char* block_data = (char *)malloc(4096 * sizeof(char)); // stores the block containing inode
+    inode cur_inode;
+    int cur_inode_block = super_block_struct.inode_block_idx + (dirnode)/128; 
+    int ret = read_block(mounted_disk_ptr,cur_inode_block,block_data); 
+
+    int offset = (dirnode)%128;
+    memcpy(&cur_inode,block_data+ offset*sizeof(inode),sizeof(inode)); //load inode
+
+    int fsize = cur_inode.size;
+
+    char* dirlist = (char*)malloc(fsize); 
+    ret = read_i(dirnode,dirlist,fsize,0); // load directory file
+
+    char* searchfile = (char*)malloc(48);
+    memset(searchfile,'\0',48); //memory to store an entry of directory list
+
+    int i = 0;
+    for(i=0;i<fsize/64;i++)
+    {
+        memcpy(searchfile,dirlist+(i*64)+8,48); // load an entry from dirlist
+        if(strcmp(searchfile,filename) == 0) // search for file
+        {
+            int inum;
+            memcpy(&inum,(void *)dirlist+(i*64)+60,4);
+            free(block_data);
+            free(dirlist);
+            free(searchfile);
+
+            return inum; //return i node number of file
+        }
+    }
+    free(block_data);
+    free(dirlist);
+    free(searchfile);
+
+    return -1;
 }
+
+int read_file(char *filepath, char *data, int length, int offset) { // A function to read a filepath(absolute address) file 
+
+
+    int len = strlen(filepath);
+    int inum;
+    char *fname = (char*)malloc(len+1); //temp variable to store file address
+    memset(fname,'\0',len+1);
+    memcpy(fname,filepath,len);
+
+    char* token = strtok(fname, "/"); 
+    
+    int dirnode = 0;
+    while (token != NULL) {  // iteratively go down the directory structure
+        // printf("%s\n", token); 
+
+        inum = find_file(token,dirnode);  // inum contains the i node number of required file
+        
+        if(inum < 0)
+        {
+            printf("File Not Found\n");
+            return -1;
+        }
+        dirnode = inum;
+        token = strtok(NULL, "/"); 
+    } 
+
+    int ret = read_i(inum,data,length,offset); 
+    free(fname);
+  
+    return ret;
+}
+
 int write_file(char *filepath, char *data, int length, int offset) {
+
+    int inum;     // inum contains the i node number of required file
+    int len = strlen(filepath);
+    char *fname = (char*)malloc(len+1); // local copy of filepath
+    memset(fname,'\0',len+1);
+    memcpy(fname,filepath,len);
+
+    char* token = strtok(fname, "/"); 
+    
+    int dirnode = 0;
+    while (token != NULL) { // iteratively go down the directory structure
+        // printf("%s\n", token); 
+
+        inum = find_file(token,dirnode);
+        
+        if(inum < 0)
+        {
+            printf("File Not Found\n");
+            return -1;
+        }
+        dirnode = inum;
+        token = strtok(NULL, "/"); 
+    } 
+
+    int ret = write_i(inum,data,length,offset); // write data to file whose inode is inum
+    return ret;
+}
+
+typedef struct find_file2_out{
+
+    int previnode;
+    int nextbyte;
+    int nwinode;
+
+}find_file2_out;
+
+
+find_file2_out find_file2(char *filename,int dirnode) // finds the given file/directory in directory given by dirnode
+{
+    find_file2_out out; // output structure that returns essential info
+    out.nwinode = -1;
+    out.previnode = dirnode;
+
+    if(strlen(filename) >=48) // if file name is >= 48 bytes, file not found
+    {
+        printf("File not found\n");
+        return out;
+    }
+
+    char* block_data = (char *)malloc(4096 * sizeof(char)); // temp memory to store block info
+    inode cur_inode; // temp memory to store inode info of current block (dirnode)
+    int cur_inode_block = super_block_struct.inode_block_idx + (dirnode)/128;
+    int ret = read_block(mounted_disk_ptr,cur_inode_block,block_data);
+
+    int offset = (dirnode)%128;
+    memcpy(&cur_inode,block_data+ offset*sizeof(inode),sizeof(inode)); //copy the inode in block into inode structure
+
+    int fsize = cur_inode.size; //size of inode
+
+    char* dirlist = (char*)malloc(fsize); // temp structure storing dir file data of dirnode
+    ret = read_i(dirnode,dirlist,fsize,0);
+
+    char* searchfile = (char*)malloc(48); // an element of dirlist
+    memset(searchfile,'\0',48);
+
+    out.nextbyte = fsize; //first free byte number in the file
+
+    int i = 0;
+    for(i=0;i<fsize/64;i++) //extracts each child's entry in dir list and compares to see if filename is present or not 
+    {
+        memcpy(searchfile,dirlist+(i*64)+8,48);
+        if(strcmp(searchfile,filename) == 0)
+        {
+            int inum;
+            memcpy(&inum,(void *)dirlist+(i*64)+60,4);
+
+            out.nwinode = inum;
+        }
+    }
+    free(block_data);
+    free(dirlist);
+    free(searchfile);
+
+    return out; // returns essential info about the search file
+}
+
+int create_dir(char *dirpath) { // creates a dirctory whose address is given by dirpath, 0 on success -1 on failure
+
+    find_file2_out inum; //structure containing essential information returned from find_file2 
+    int len = strlen(dirpath);
+    char *fname = (char*)malloc(len+1);
+    char *tempname = (char*)malloc(len+1);
+    memset(fname,'\0',len+1);
+    memset(tempname,'\0',len+1);
+    memcpy(fname,dirpath,len); //temporarily storing dirpath in fname variable
+
+    char* token = strtok(fname, "/"); 
+
+    int n = 0;
+    while (token != NULL) {  // tokenizing code for getting number of directories in the path
+        n++;
+        // printf("%s\n", token); 
+        token = strtok(NULL, "/"); 
+
+    }
+
+    memcpy(fname,dirpath,len); 
+    token = strtok(fname, "/");
+
+    int dirnode = 0;             // initialize dirnode to zero which represents root inode
+    int i = 0;
+    while (token != NULL) { // tokenizing code 2 to go through the given path iteratively
+        i++;
+        // printf("%s\n", token); 
+
+        inum = find_file2(token,dirnode); // dirnode represents current directory(initially 0, means root) 
+                                         // Given filename (token) is checked in current directory
+
+        if(inum.nwinode < 0 && i<n) // i < n => dir in intermediate path, inum.nwnode < 0 given file/dir is not found in current dir
+        {
+            printf("File Not Found\n");
+            free(fname);
+            free(tempname);
+            return -1;
+        }
+        
+        if(inum.nwinode >= 0 && i==n) // i ==  n => the file/dir we are supposed to create
+        {
+            printf("There is already a file with same name \n");
+            free(fname);
+            free(tempname);
+            return -1;
+        }
+
+        dirnode = inum.nwinode;
+        memcpy(tempname,token,strlen(token));
+        token = strtok(NULL, "/"); 
+    }
+
+    if(strlen(tempname) >=48 )
+    {
+        printf("File name is too long(>47) : NOT SUPPORTED\n");
+        return -1;
+    }
+    
+
+    int inode_created = create_file();
+    char* data = (char*)calloc(64,1);
+    int temp = 1; // valid bit
+    memcpy(data,&temp,4);
+
+
+
+    temp = 0; // creation a directory
+    memcpy(data+4,&temp,4);
+
+    memcpy(data+8,tempname,48); // copying filename
+    
+    temp = 48;
+    memcpy(data+56,&temp,4); //  filename size
+
+    temp = inode_created;
+    memcpy(data+60,&temp,4); // inode number
+    // printf("node%s\n",data+8);
+    int ret = write_i(inum.previnode,data,64,inum.nextbyte);
+
+    free(fname);
+    free(tempname);
+    free(data);
+
     return 0;
 }
-int create_dir(char *dirpath) {
-    return 0;
+
+typedef struct find_file3_out{
+
+    int previnode;
+    int nextbyte;
+    int nwinode;
+    int replacebyte;
+
+}find_file3_out;
+
+find_file3_out find_file3(char *filename,int dirnode)
+{
+    find_file3_out out;
+    out.nwinode = -1;
+    out.previnode = dirnode;
+
+    if(strlen(filename) >=48) 
+    {
+        printf("File not found\n");
+        return out;
+    }
+
+    char* block_data = (char *)malloc(4096 * sizeof(char));
+    inode cur_inode;
+    int cur_inode_block = super_block_struct.inode_block_idx + (dirnode)/128;
+    int ret = read_block(mounted_disk_ptr,cur_inode_block,block_data);
+
+    int offset = (dirnode)%128;
+    memcpy(&cur_inode,block_data+ offset*sizeof(inode),sizeof(inode));
+
+    int fsize = cur_inode.size;
+
+    char* dirlist = (char*)malloc(fsize);
+    ret = read_i(dirnode,dirlist,fsize,0);
+
+    char* searchfile = (char*)malloc(48);
+    memset(searchfile,'\0',48);
+
+    out.nextbyte = fsize;
+
+    int i = 0;
+    for(i=0;i<fsize/64;i++)
+    {
+        memcpy(searchfile,dirlist+(i*64)+8,48);
+        if(strcmp(searchfile,filename) == 0)
+        {
+            int inum;
+            out.replacebyte = i*64;
+            memcpy(&inum,(void *)dirlist+(i*64)+60,4);
+
+            out.nwinode = inum;
+        }
+    }
+    free(block_data);
+    free(dirlist);
+    free(searchfile);
+
+    return out;
 }
-int remove_dir(char *dirpath) {
+
+int remove_dir(char *dirpath) { //removes directory given by dirpath
+
+    find_file3_out inum; //output structure of fine_file3 fn containing essential information
+    int len = strlen(dirpath);
+    char *fname = (char*)malloc(len+1); //maintains a copy of dirpath
+    memset(fname,'\0',len+1);
+    memcpy(fname,dirpath,len);
+
+    // char *fname = (char*)malloc(len+1);
+    // memset(fname,'\0',len+1);
+    // memcpy(fname,dirpath,len);
+
+    char* token = strtok(fname, "/");
+
+    int dirnode = 0; // represents the root directory
+    while (token != NULL) { // iteratively pass through directory dtructure
+
+
+        inum = find_file3(token,dirnode);
+        
+        if(inum.nwinode < 0)
+        {
+            
+            printf("File Not Found\n");
+            free(fname);
+            return -1;
+        }
+
+        dirnode = inum.nwinode;
+        // strcpy(tempname,token,strlen(token));
+        token = strtok(NULL, "/"); 
+    }
+    // printf("%d\n",inum.previnode);
+    int ret = remove_file(inum.nwinode); // remove file at the address
+    char* data = (char*)calloc(inum.nextbyte,1); //for resetting dir entry in parent dir
+
+    // write_i(inum.previnode,data,0,inum.replacebyte);
+    read_i(inum.previnode,data,inum.nextbyte,0);
+    memcpy(data+inum.replacebyte,data+inum.nextbyte-64,64);
+    // printf("yo %s\n",data+8);
+    write_i(inum.previnode,data,inum.nextbyte-64,0); //replace the empty spot with last entry
+
+    // memset(data,'\0',64);
+    // write_i(inum.previnode,data,64,inum.nextbyte-64);
+
+    free(data);
+    free(fname);
     return 0;
 }
