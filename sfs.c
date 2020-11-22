@@ -376,10 +376,32 @@ int stat(int inumber) {
         indirect_pointers = 0;
     }
 
+    /*read data block indices into an array*/
+    int num_data_blocks_used = (int)inode_struct.size / 4096;
+    num_data_blocks_used += ((int)inode_struct.size % 4096 != 0) ? 1 : 0;
+
+    int *blocks_idx_arr = (int *)malloc(num_data_blocks_used * sizeof(int));
+    if (num_data_blocks_used > 5) {
+        memcpy((void *)blocks_idx_arr, (void *)inode_struct.direct, 5 * sizeof(int));
+        read_block(diskptr, (int)super_block_struct.data_block_idx + (int)inode_struct.indirect, block_data);
+        memcpy((void *)(blocks_idx_arr + 5), (void *)block_data, (num_data_blocks_used - 5) * sizeof(int));
+
+    } else {
+        memcpy((void *)blocks_idx_arr, (void *)inode_struct.direct, num_data_blocks_used * sizeof(int));
+    }
+
     printf("\n==== inode %d statistics ====\n", inumber);
     printf("logical size : %d\n", (int)inode_struct.size);
     printf("# direct pointers   : %d\n", direct_pointers);
     printf("# indirect pointers : %d\n", indirect_pointers);
+    if(indirect_pointers > 0) {
+        printf("# indirect pointer block : %d\n", (int)inode_struct.indirect);
+    }
+    printf("# data blocks : ");
+    for (int i = 0; i < num_data_blocks_used; i++) {
+        printf("%d, ", blocks_idx_arr[i]);
+    }
+    printf("\n");
     printf("==== ******************** ====\n");
 
     free(block_data);
@@ -403,13 +425,15 @@ int read_i(int inumber, char *data, int length, int offset) {
         return -1;
     }
 
-    inode inode_struct;
-
     /*read inode and copy it to inode_struct*/
-    int inode_block_idx = (int)super_block_struct.inode_block_idx + (inumber / 128);
-    read_block(diskptr, inode_block_idx, block_data);
-    inode* inode_ptr = (inode *)(block_data + (inumber % 128) * 32);
-    memcpy((void *)&inode_struct, (void *)inode_ptr, sizeof(inode));
+    inode inode_struct;
+    read_inode_struct(inumber, &inode_struct);
+
+    
+    // int inode_block_idx = (int)super_block_struct.inode_block_idx + (inumber / 128);
+    // read_block(diskptr, inode_block_idx, block_data);
+    // inode* inode_ptr = (inode *)(block_data + (inumber % 128) * 32);
+    // memcpy((void *)&inode_struct, (void *)inode_ptr, sizeof(inode));
 
     /*check if offset is valid*/
     if (offset >=  inode_struct.size) {
@@ -436,7 +460,7 @@ int read_i(int inumber, char *data, int length, int offset) {
     int *blocks_idx_arr = (int *)malloc(num_data_blocks_used * sizeof(int));
     if (num_data_blocks_used > 5) {
         memcpy((void *)blocks_idx_arr, (void *)inode_struct.direct, 5 * sizeof(int));
-        read_block(diskptr, (int)inode_struct.indirect, block_data);
+        read_block(diskptr, (int)super_block_struct.data_block_idx + (int)inode_struct.indirect, block_data);
         memcpy((void *)(blocks_idx_arr + 5), (void *)block_data, (num_data_blocks_used - 5) * sizeof(int));
 
     } else {
@@ -449,7 +473,7 @@ int read_i(int inumber, char *data, int length, int offset) {
     char* blocks_storage = (char *)malloc(num_read_blocks * 4096 * sizeof(char));
     int i, j;
     for (i = block_begin, j = 0; i <= block_end; i++, j++) {
-        read_block(diskptr, blocks_idx_arr[i], blocks_storage + 4096*j);
+        read_block(diskptr, (int)super_block_struct.data_block_idx + blocks_idx_arr[i], blocks_storage + 4096*j);
     }
 
     int byte_offset = offset % 4096;
@@ -481,11 +505,6 @@ int write_i(int inumber, char *data, int length, int offset) {
     inode inode_struct;
     read_inode_struct(inumber, &inode_struct);
 
-    // /*read inode and copy it to inode_struct*/
-    // int inode_block_idx = (int)super_block_struct.inode_block_idx + (inumber / 128);
-    // read_block(diskptr, inode_block_idx, block_data);
-    // inode* inode_ptr = (inode *)(block_data + (inumber % 128) * 32);
-    // memcpy((void *)&inode_struct, (void *)inode_ptr, sizeof(inode));
 
     /*offset can be at max inode size, usually appending*/
     if(offset < 0 && offset > (int)inode_struct.size) {
@@ -505,7 +524,7 @@ int write_i(int inumber, char *data, int length, int offset) {
 
     if (data_blocks_used > 5) {
         memcpy((void *)blocks_idx_arr, (void *)inode_struct.direct, 5 * sizeof(int));
-        read_block(diskptr, (int)inode_struct.indirect, block_data);
+        read_block(diskptr, (int)super_block_struct.data_block_idx + (int)inode_struct.indirect, block_data);
         memcpy((void *)(blocks_idx_arr + 5), (void *)block_data, (data_blocks_used - 5) * sizeof(int));
 
     } else {
@@ -513,29 +532,32 @@ int write_i(int inumber, char *data, int length, int offset) {
     }
 
     int idx_it = data_blocks_used;
+    // printf("idx_it : %d\n",idx_it);
 
     if (total_blocks_needed > 5) {
 
         if (data_blocks_used > 5) { /* inode already has an indirect pointer*/
-
+            // printf("case 1\n");
             /*get extra indirect blocks*/
+            int data_block_idx = (int)super_block_struct.data_block_idx;
             int* indirect_pointers = (int *)malloc(1024 * sizeof(int));
-            read_block(diskptr, (int)inode_struct.indirect, (char *)indirect_pointers);
-            indirect_pointers = indirect_pointers + (data_blocks_used - 5);
+            read_block(diskptr, data_block_idx + (int)inode_struct.indirect, (char *)indirect_pointers);
+            // print_block_data((char *)indirect_pointers);
+            int* idp_offset = indirect_pointers + (data_blocks_used - 5);
 
             for (int i = 0; i < extra_blocks_needed; i++) {
                 int free_data_block_index = get_set_first_available_data_block_index();
                 blocks_idx_arr[idx_it++] = free_data_block_index;
-                *indirect_pointers = free_data_block_index;
-                indirect_pointers++;
+                *idp_offset = free_data_block_index;
+                idp_offset++;
             }
 
             /*update indirect block*/
-            write_block(diskptr, (int)inode_struct.indirect, (char *)indirect_pointers);
+            write_block(diskptr, data_block_idx + (int)inode_struct.indirect, (char *)indirect_pointers);
             free(indirect_pointers);
     
         } else { /*inode doesn't have an indirect pointer*/
-
+            // printf("case 2\n");
             /*get extra direct blocks first*/
             for (int i = data_blocks_used; i < 5; i++) {
                 int free_data_block_index = get_set_first_available_data_block_index();
@@ -543,27 +565,33 @@ int write_i(int inumber, char *data, int length, int offset) {
                 inode_struct.direct[i] = free_data_block_index;
             }
             
+
             /*get extra indirect blocks */
             int free_indirect_block_index = get_set_first_available_data_block_index();
             inode_struct.indirect = (uint32_t)free_indirect_block_index;
 
+            int data_block_idx = (int)super_block_struct.data_block_idx;
             int* indirect_pointers = (int *)malloc(1024 * sizeof(int));
-            read_block(diskptr, (int)inode_struct.indirect, (char *)indirect_pointers);
+            read_block(diskptr, data_block_idx + (int)inode_struct.indirect, (char *)indirect_pointers);
+            
+            int* idp_offset = indirect_pointers;
+
 
             for (int i = 0; i < (total_blocks_needed - 5); i++) {
                 int free_data_block_index = get_set_first_available_data_block_index();
                 blocks_idx_arr[idx_it++] = free_data_block_index;
-                *indirect_pointers = free_data_block_index;
-                indirect_pointers++;
+                *idp_offset = free_data_block_index;
+                idp_offset++;
             }
 
             /*update indirect block*/
-            write_block(diskptr, (int)inode_struct.indirect, (char *)indirect_pointers);
+            // print_block_data((char *)indirect_pointers);
+            write_block(diskptr, data_block_idx + (int)inode_struct.indirect, (char *)indirect_pointers);
             free(indirect_pointers);
         }
 
     } else { /*write can be fulfilled by direct pointers*/
-
+        // printf("case 3\n");
         for (int i = data_blocks_used; i < total_blocks_needed; i++) {
             int free_data_block_index = get_set_first_available_data_block_index();
             blocks_idx_arr[idx_it++] = free_data_block_index;
@@ -571,24 +599,34 @@ int write_i(int inumber, char *data, int length, int offset) {
         }
     }
 
+    // printf("blocks idx arr : ");
+    // for ( int i=0; i < total_blocks_needed; i++) {
+    //     printf("%d, ", blocks_idx_arr[i]);
+    // }
+    // printf("\n");
+
     int block_begin = offset / 4096;
     int block_end = (offset + length - 1) / 4096;
     
+    int data_block_idx = (int)super_block_struct.data_block_idx;
     int num_write_blocks = block_end - block_begin + 1;
     char* blocks_storage = (char *)malloc(num_write_blocks * 4096 * sizeof(char));
     int i, j;
     for (i = block_begin, j = 0; i <= block_end; i++, j++) {
-        read_block(diskptr, blocks_idx_arr[i], blocks_storage + 4096*j);
+        read_block(diskptr, data_block_idx + blocks_idx_arr[i], blocks_storage + 4096*j);
     }
 
     int byte_offset = offset % 4096;
     memcpy(blocks_storage + byte_offset, data, length);
 
     for (i = block_begin, j = 0; i <= block_end; i++, j++) {
-        write_block(diskptr, blocks_idx_arr[i], blocks_storage + 4096*j);
+        write_block(diskptr, data_block_idx + blocks_idx_arr[i], blocks_storage + 4096*j);
     }
 
+    /*update inode size*/
+    inode_struct.size = (uint32_t)(offset + length);
     write_inode_struct(inumber, &inode_struct);
+
     free(blocks_storage);
     free(blocks_idx_arr);
 

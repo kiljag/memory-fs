@@ -28,10 +28,13 @@ disk* create_disk(int nbytes) {
 }
 
 int read_block(disk *diskptr, int blocknr, void *block_data) {
-
-    if (blocknr >= diskptr->blocks) {
+    
+    if (blocknr < 0 || blocknr >= diskptr->blocks) {
+        printf("block %d is out of range\n", blocknr);
         return -1;
     }
+
+    // printf("reading disk block : %d\n", blocknr);
 
     char *block_arr_ptr = *(diskptr->block_arr);
     char *block_ptr = block_arr_ptr + blocknr*BLOCKSIZE;
@@ -49,9 +52,13 @@ int read_block(disk *diskptr, int blocknr, void *block_data) {
 }
 
 int write_block(disk *diskptr, int blocknr, void *block_data) {
-    if (blocknr >= diskptr->blocks) {
+    
+    if (blocknr < 0 || blocknr >= diskptr->blocks) {
+        printf("block %d is out of range\n", blocknr);
         return -1;
     }
+
+    // printf("writing disk block : %d\n", blocknr);
 
     char *block_arr_ptr = *(diskptr->block_arr);
     char *block_ptr = block_arr_ptr + blocknr*BLOCKSIZE;
