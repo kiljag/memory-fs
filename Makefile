@@ -8,3 +8,6 @@ disk.o: disk.c disk.h
 	gcc -c -g disk.c -Wall
 util.o: util.c util.h
 	gcc -c -g util.c -Wall
+
+clean:
+	rm outfile main *.o

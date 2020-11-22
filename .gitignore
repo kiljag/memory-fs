@@ -2,3 +2,4 @@
 #ignore object files
 *.o
 outfile
+main
